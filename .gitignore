@@ -1,0 +1,5 @@
+a.out
+matt_daemon
+*.o
+*.log
+*.pid
