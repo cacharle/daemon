@@ -10,6 +10,8 @@
 #include <netinet/ip.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <arpa/inet.h>
+#include <signal.h>
 
 static const char *pid_file_path = "daemon.pid";
 static int sock_fd = -1;
@@ -31,6 +33,7 @@ void log_info(const char *format, ...)
 
 void cleanup(void)
 {
+    log_info("Cleanup");
     if (sock_fd != -1)
         close(sock_fd);
     if (log_file != NULL)
@@ -45,12 +48,23 @@ void die(const char *message)
     exit(EXIT_FAILURE);
 }
 
+void signal_handler(int signum)
+{
+    log_info("Received signal: %d", signum);
+    cleanup();
+    log_info("Quitting after signal");
+    exit(EXIT_SUCCESS);
+}
+
 int main(void)
 {
     pid_t child_pid;
     child_pid = fork();
     if (child_pid == -1)
-        die("Cannot fork");
+    {
+        log_info("Error: Cannot fork: %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
     // We have successfuly created a child process, the parent can exit
     if (child_pid > 0)
         exit(EXIT_SUCCESS);
@@ -59,13 +73,19 @@ int main(void)
     // This is done to "unlink" the process from the original terminal and any
     // other kind of things the parent had (signal handling, ..)
     if (setsid() == -1)
-        die("setsid failed");
+    {
+        log_info("Error: setsid failed: %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
 
     pid_t pid = getpid();
     // Note the O_EXCL flag saying the file HAS to be created
     int pid_fd = open(pid_file_path, O_CREAT | O_EXCL | O_WRONLY | O_TRUNC, 0644);
     if (pid_fd == -1)
-        die("Failed to open pid file");
+    {
+        log_info("Error: Failed to open pid file: %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
     FILE *pid_file = fdopen(pid_fd, "w");
     assert(pid_file != NULL);
     fprintf(pid_file, "%d", pid);
@@ -86,6 +106,11 @@ int main(void)
     dup2(log_fd, STDOUT_FILENO);
     dup2(log_fd, STDERR_FILENO);
 
+    // Registering signal handler for common signals
+    signal(SIGHUP, signal_handler);
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
     log_info("Started");
     sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_fd == -1)
@@ -97,7 +122,7 @@ int main(void)
     struct sockaddr_in addr = {
         addr.sin_family = AF_INET,
         addr.sin_port = htons(8042),
-        addr.sin_addr.s_addr = INADDR_ANY,
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK),
     };
     if (bind(sock_fd, (struct sockaddr*)&addr, sizeof addr) == -1)
         die("Failed to bind socket");
@@ -136,7 +161,7 @@ int main(void)
         }
     }
 
-    log_info("Quitting");
     cleanup();
+    log_info("Quitting after 'quit' command");
     return 0;
 }
