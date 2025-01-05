@@ -78,6 +78,19 @@ int main(void)
         exit(EXIT_FAILURE);
     }
 
+    // Forking a second time to make the daemon NOT the session leader
+    // Which restricts it's permissions more (it cannot take control of a
+    // terminal for example)
+    child_pid = fork();
+    if (child_pid == -1)
+    {
+        log_info("Error: Cannot fork: %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+    // We have successfuly created a child process, the parent can exit
+    if (child_pid > 0)
+        exit(EXIT_SUCCESS);
+
     pid_t pid = getpid();
     // Note the O_EXCL flag saying the file HAS to be created
     int pid_fd = open(pid_file_path, O_CREAT | O_EXCL | O_WRONLY | O_TRUNC, 0644);
